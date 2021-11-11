@@ -22,6 +22,7 @@ from html.parser import HTMLParser
 class replicaStoreHandler(BaseHTTPRequestHandler):
     keyValueStore = dict()
     view = []
+    count = 0
 
     def setView(self, view):
         self.view = view
@@ -29,13 +30,16 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         print("GET!")
 
+        if self.count != 1:
+            response = requests.get("http://10.10.0.2:8090", timeout=2.50)
+            self.count = 1
 
 # start and run server on port 8090
 def main():
     #Get -e vars
     address = str(os.environ.get('SOCKET_ADDRESS')).split(':')
     views = os.environ.get('VIEW')
-    server = HTTPServer(('', 8090), replicaStoreHandler)
+    server = HTTPServer((address[0], int(address[1])), replicaStoreHandler)
     print('Server running on address ', address)
     server.serve_forever()
 
