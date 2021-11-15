@@ -33,13 +33,14 @@ class http_server:
 class replicaStoreHandler(BaseHTTPRequestHandler):
     keyValueStore = dict()
     view = []
+    metadata = []
     count = 0
     sock = ""
-    
-    #When a new replica is added to the system, it broadcasts a PUT-view request
-    #so the existing replicas add the new replica to their view. 
+
     def startUpBroadcast(self):
         for i in self.view:
+            #add metadata slot for each replica
+            self.metadata.append(0)
 
             #Don't check our own socket address
             if i == os.environ.get('SOCKET_ADDRESS'):
@@ -60,7 +61,7 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                 print("\nresponse is: ")
                 print(response)
             else:
-                print(i + "is not up yet")
+                print(i + " is not up yet")
 
     # handle post requests
     def do_PUT(self):
@@ -90,9 +91,48 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                 self.send_response(201)
                 self.send_header("Content-type", "application/json")
                 self.end_headers()
+                self.metadata.append(0) #add a new slot for new replica
                 jsndict = {"result": "added"}
                 jsnrtrn = json.dumps(jsndict)
                 self.wfile.write(jsnrtrn.encode("utf8"))
+
+        #Put request for kvs
+        #TODO: response 503 Service Unavailable logic and response
+        if len(parsed_path) == 2 and parsed_path[1] == 'kvs': parsed_path.append("")
+        if len(parsed_path) == 3:
+            if parsed_path[1] == 'kvs':
+                # Get Json body {"value": <value>}
+                content_len = int(self.headers.get('content-length'))
+                body = self.rfile.read(content_len)
+                data = json.loads(body)
+                print(data)
+
+                # 400 BAD REQUEST KEY TOO LONG
+                if len(parsed_path[2]) > 50:
+                    self.send_response(400)
+                    self.send_header("Content-type", "application/json")
+                    self.end_headers()
+                    jsndict = {"error": "Key is too long"}
+                    jsnrtrn = json.dumps(jsndict)
+                    self.wfile.write(jsnrtrn.encode("utf8"))
+                # 400 BAD REQUEST NO VALUE SPECIFIED
+                elif 'value' not in data:
+                    self.send_response(400)
+                    self.send_header("Content-type", "application/json")
+                    self.end_headers()
+                    jsndict = {"error": "PUT request does not specify a value"}
+                    jsnrtrn = json.dumps(jsndict)
+                    self.wfile.write(jsnrtrn.encode("utf8"))
+                elif 'value' in data:
+                    ##200 OK
+                    if parsed_path[2] in self.keyValueStore:
+                        # TODO 200
+                        print("200")
+                    ##201 CREATED
+                    else:
+                        # TODO 200
+                        print("201")
+
 
 
     def do_GET(self):
@@ -106,6 +146,24 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
             jsndict = {"view": self.view}
             jsnrtrn = json.dumps(jsndict)
             self.wfile.write(jsnrtrn.encode("utf8"))
+
+        #Get request for kvs
+        #TODO: response 503 service unavailable
+        if len(parsed_path) == 2 and parsed_path[1] == 'kvs': parsed_path.append("")  # Handle as if it was empty string
+        if len(parsed_path) == 3:
+            if parsed_path[1] == 'kvs':
+
+                # If key exists #200 OK else #404 Not Found
+                if parsed_path[2] in self.keyValueStore:
+                    # TODO 200
+                    print("200")
+                else:
+                    self.send_response(404)
+                    self.send_header("Content-type", "application/json")
+                    self.end_headers()
+                    jsndict = {"error": "Key does not exist"}
+                    jsnrtrn = json.dumps(jsndict)
+                    self.wfile.write(jsnrtrn.encode("utf8"))
 
 
     def do_DELETE(self):
@@ -136,6 +194,22 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                 jsndict = {"error": "View has no such replica"}
                 jsnrtrn = json.dumps(jsndict)
                 self.wfile.write(jsnrtrn.encode("utf8"))
+
+        #Delete request for kvs
+        #TODO: 503 service unavailable error causal dependiecies not satisfied
+        if len(parsed_path) == 2 and parsed_path[1] == 'kvs': parsed_path.append("")  # Handle as if it was empty string
+        if len(parsed_path) == 3:
+            if parsed_path[1] == 'kvs':
+                if parsed_path[2] in self.keyValueStore:
+                    #TODO 200
+                    print("200")
+                else:
+                    self.send_response(404)
+                    self.send_header("Content-type", "application/json")
+                    self.end_headers()
+                    jsndict = {"error": "Key does not exist"}
+                    jsnrtrn = json.dumps(jsndict)
+                    self.wfile.write(jsnrtrn.encode("utf8"))
 
 # start and run server on specified port
 def main():
