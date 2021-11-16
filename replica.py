@@ -37,6 +37,7 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
     count = 0
     sock = ""
 
+    # at startup, put yourself to everyone's view
     def startUpBroadcast(self):
         for i in self.view:
             #add metadata slot for each replica
@@ -86,6 +87,7 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                 jsndict = {"result": "already present"}
                 jsnrtrn = json.dumps(jsndict)
                 self.wfile.write(jsnrtrn.encode("utf8"))
+                print("address in self view")
             else:
                 self.view.append(checkAddress)
                 self.send_response(201)
@@ -95,6 +97,7 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                 jsndict = {"result": "added"}
                 jsnrtrn = json.dumps(jsndict)
                 self.wfile.write(jsnrtrn.encode("utf8"))
+                print("address not in self view")
 
         #Put request for kvs
         #TODO: response 503 Service Unavailable logic and response
@@ -126,12 +129,23 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                 elif 'value' in data:
                     ##200 OK
                     if parsed_path[2] in self.keyValueStore:
-                        # TODO 200
-                        print("200")
+                        self.keyValueStore[parsed_path[2]] = data['value']
+                        self.send_response(200)
+                        self.send_header("Content-type", "application/json")
+                        self.end_headers()
+                        jsndict = {"result": "replaced"}
+                        jsnrtrn = json.dumps(jsndict)
+                        self.wfile.write(jsnrtrn.encode("utf8"))
+                        
                     ##201 CREATED
                     else:
-                        # TODO 200
-                        print("201")
+                        self.send_response(201)
+                        self.send_header("Content-type", "application/json")
+                        self.end_headers()
+                        jsndict = {"result": "created"}
+                        jsnrtrn = json.dumps(jsndict)
+                        self.wfile.write(jsnrtrn.encode("utf8"))
+                        self.keyValueStore[parsed_path[2]] = data['value']
 
 
 
@@ -155,8 +169,12 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
 
                 # If key exists #200 OK else #404 Not Found
                 if parsed_path[2] in self.keyValueStore:
-                    # TODO 200
-                    print("200")
+                    self.send_response(200)
+                    self.send_header("Content-type", "application/json")
+                    self.end_headers()
+                    jsndict = { "result": "found", "value": self.keyValueStore[parsed_path[2]] }
+                    jsnrtrn = json.dumps(jsndict)
+                    self.wfile.write(jsnrtrn.encode("utf8"))
                 else:
                     self.send_response(404)
                     self.send_header("Content-type", "application/json")
