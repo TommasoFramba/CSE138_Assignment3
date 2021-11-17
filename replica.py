@@ -37,6 +37,7 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
     count = 0
     sock = ""
 
+
     def startUpBroadcast(self):
         getKVSFlag = False
 
@@ -124,11 +125,48 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
         if len(parsed_path) == 2 and parsed_path[1] == 'kvs': parsed_path.append("")
         if len(parsed_path) == 3:
             if parsed_path[1] == 'kvs':
-                # Get Json body {"value": <value>}
+
+                # Get Json body
                 content_len = int(self.headers.get('content-length'))
                 body = self.rfile.read(content_len)
                 data = json.loads(body)
                 print("Json data from rqst: ", data)
+
+                #Check for 503
+                causal = data['causal-metadata']
+                if causal != None:
+                    print("We have causal metadata")
+                    socker = str(self.client_address[0]) + ":8090"
+                    flag503 = False
+                    if socker not in self.view:
+                        print("CLIENT REQUEST CHECKING FOR CAUSAL METADATA")
+                        indexOfOurSock = self.view.index(os.environ.get('SOCKET_ADDRESS'))
+                        print("Causal: ", causal)
+                        print("OurMetadata: ", self.metadata)
+                        print("index of our sock: ", indexOfOurSock)
+                        for i in range(0, len(self.metadata)):
+                            if self.metadata[i] != causal[i]:
+                                flag503 = True
+                    else:
+                        print("Replica request checking for causal metadata")
+                        indexOfClientSock = self.view.index(socker)
+                        print("Causal: ", causal)
+                        print("OurMetadata: ", self.metadata)
+                        print("index of our sock: ", indexOfClientSock)
+                        for i in range(0, len(self.metadata)):
+                            if self.metadata[i] != causal[i]:
+                                flag503 = True
+
+                    if flag503:
+                        self.send_response(503)
+                        self.send_header("Content-type", "application/json")
+                        self.end_headers()
+                        jsndict = {"error": "Causal dependencies not satisfied; try again later"}
+                        jsnrtrn = json.dumps(jsndict)
+                        self.wfile.write(jsnrtrn.encode("utf8"))
+                        return
+
+
 
                 # 400 BAD REQUEST KEY TOO LONG
                 if len(parsed_path[2]) > 50:
@@ -149,51 +187,55 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                 elif 'value' in data:
                     ##200 OK
                     if parsed_path[2] in self.keyValueStore:
-                        # Check causal metadata
-
-                        # Process request
-
-                        # Generate causal metadata
-
                         # Store the keyvalue pair
                         self.keyValueStore[parsed_path[2]] = data['value']
 
-                        # update local causal metadata
+                        # replica broadcasts write to all the other replicas
+                        if 'replica' not in data:
+                            self.broadCastPutKVS(parsed_path[2], data['value'])
+                            index = self.view.index(os.environ.get('SOCKET_ADDRESS'))
+                            # Process request
+                            self.metadata[index] = self.metadata[index] + 1
+                            print("Metadata ", self.metadata)
+                        else:
+                            index = self.view.index(data['sock'])
+                            self.metadata[index] = self.metadata[index] + 1
+                            print("Metadata ", self.metadata)
 
                         self.send_response(200)
                         self.send_header("Content-type", "application/json")
                         self.end_headers()
-                        jsndict = {"result": "replaced"}
+                        jsndict = {"result": "updated", "causal-metadata": self.metadata}
                         jsnrtrn = json.dumps(jsndict)
                         self.wfile.write(jsnrtrn.encode("utf8"))
-                        # replica broadcasts write to all the other replicas
-                        if 'replica' not in data:
-                            self.broadCastPutKVS(parsed_path[2], data['value'])
 
                     ##201 CREATED
                     else:
-                        #Check causal metadata
-
-                        #Process request
-
-                        #Generate causal metadata
-
                         #Store the keyvalue pair
                         self.keyValueStore[parsed_path[2]] = data['value']
 
                         #update local causal metadata
 
                         #Respond to client with a json including new causal
-                        self.send_response(201)
-                        self.send_header("Content-type", "application/json")
-                        self.end_headers()
-                        jsndict = {"result": "created"}
-                        jsnrtrn = json.dumps(jsndict)
-                        self.wfile.write(jsnrtrn.encode("utf8"))
+
                         #replica broadcasts write to all the other replicas
                         if 'replica' not in data:
                             self.broadCastPutKVS(parsed_path[2], data['value'])
+                            index = self.view.index(os.environ.get('SOCKET_ADDRESS'))
+                            # Process request
+                            self.metadata[index] = self.metadata[index] + 1
+                            print("Metadata ", self.metadata)
+                        else:
+                            index = self.view.index(data['sock'])
+                            self.metadata[index] = self.metadata[index] + 1
+                            print("Metadata ", self.metadata)
 
+                        self.send_response(201)
+                        self.send_header("Content-type", "application/json")
+                        self.end_headers()
+                        jsndict = {"result": "created", "causal-metadata": self.metadata}
+                        jsnrtrn = json.dumps(jsndict)
+                        self.wfile.write(jsnrtrn.encode("utf8"))
 
 
     def broadCastPutKVS(self, key, value):
@@ -212,14 +254,21 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                 # send a put /kvs/value to each view
                 url = "http://" + i + "/kvs/" + key
                 jsndict = {"value": value,
-                           "replica": True}
+                           "replica": True,
+                           "causal-metadata": self.metadata,
+                           "sock": os.environ.get('SOCKET_ADDRESS')}
                 data = json.dumps(jsndict)
                 response = requests.put(url, data=data, timeout=5)
                 print("\nresponse is: ")
                 print(response)
             else:
-                print(i + " is not up")
-
+                print("One is down delete it!")
+                url = "http://" + i
+                jsndict = {"socket-address": i}
+                data = json.dumps(jsndict)
+                response = requests.put(url, data=data, timeout=5)
+                print("\nresponse is: ")
+                print(response)
 
 
     def do_GET(self):
@@ -240,14 +289,56 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
         if len(parsed_path) == 3:
             if parsed_path[1] == 'kvs':
 
+                # Get Json body {"causal-metadata": <V>}
+                content_len = int(self.headers.get('content-length'))
+                body = self.rfile.read(content_len)
+                data = json.loads(body)
+                print("Json data from rqst: ", data)
+
                 # If key exists #200 OK else #404 Not Found
                 if parsed_path[2] in self.keyValueStore:
+                    # Check causal metadata
+                    causal = data['causal-metadata']
+                    if causal != None:
+                        print("We have causal metadata")
+                        socker = str(self.client_address[0]) + ":8090"
+                        flag503 = False
+                        if socker not in self.view:
+                            print("CLIENT REQUEST CHECKING FOR CAUSAL METADATA")
+                            indexOfOurSock = self.view.index(os.environ.get('SOCKET_ADDRESS'))
+                            print("Causal: ", causal)
+                            print("OurMetadata: ", self.metadata)
+                            print("index of our sock: ", indexOfOurSock)
+                            for i in range(0,len(self.metadata)):
+                                if self.metadata[i] != causal[i]:
+                                    flag503 = True
+                        else:
+                            print("Replica request checking for causal metadata")
+                            indexOfClientSock = self.view.index(socker)
+                            print("Causal: ", causal)
+                            print("OurMetadata: ", self.metadata)
+                            print("index of our sock: ", indexOfClientSock)
+                            for i in range(0, len(self.metadata)):
+                                if self.metadata[i] != causal[i]:
+                                    flag503 = True
+
+                        if flag503:
+                            self.send_response(503)
+                            self.send_header("Content-type", "application/json")
+                            self.end_headers()
+                            jsndict = {"error": "Causal dependencies not satisfied; try again later"}
+                            jsnrtrn = json.dumps(jsndict)
+                            self.wfile.write(jsnrtrn.encode("utf8"))
+                            return
+
                     self.send_response(200)
                     self.send_header("Content-type", "application/json")
                     self.end_headers()
-                    jsndict = {"result": "found", "value": self.keyValueStore[parsed_path[2]]}
+                    jsndict = {"result": "found", "value": self.keyValueStore[parsed_path[2]],
+                               "causal-metadata": self.metadata}
                     jsnrtrn = json.dumps(jsndict)
                     self.wfile.write(jsnrtrn.encode("utf8"))
+
                 else:
                     self.send_response(404)
                     self.send_header("Content-type", "application/json")
@@ -268,6 +359,40 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
             body = self.rfile.read(content_len)
             data = json.loads(body)
 
+            # Check for 503
+            causal = data['causal-metadata']
+            if causal != None:
+                print("We have causal metadata")
+                socker = str(self.client_address[0]) + ":8090"
+                flag503 = False
+                if socker not in self.view:
+                    print("CLIENT REQUEST CHECKING FOR CAUSAL METADATA")
+                    indexOfOurSock = self.view.index(os.environ.get('SOCKET_ADDRESS'))
+                    print("Causal: ", causal)
+                    print("OurMetadata: ", self.metadata)
+                    print("index of our sock: ", indexOfOurSock)
+                    for i in range(0, len(self.metadata)):
+                        if self.metadata[i] != causal[i]:
+                            flag503 = True
+                else:
+                    print("Replica request checking for causal metadata")
+                    indexOfClientSock = self.view.index(socker)
+                    print("Causal: ", causal)
+                    print("OurMetadata: ", self.metadata)
+                    print("index of our sock: ", indexOfClientSock)
+                    for i in range(0, len(self.metadata)):
+                        if self.metadata[i] != causal[i]:
+                            flag503 = True
+
+                if flag503:
+                    self.send_response(503)
+                    self.send_header("Content-type", "application/json")
+                    self.end_headers()
+                    jsndict = {"error": "Causal dependencies not satisfied; try again later"}
+                    jsnrtrn = json.dumps(jsndict)
+                    self.wfile.write(jsnrtrn.encode("utf8"))
+                    return
+            
             # Check if address is in view
             checkAddress = data['socket-address']
             if checkAddress in self.view:
@@ -317,6 +442,14 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                     self.wfile.write(jsnrtrn.encode("utf8"))
                     if 'replica' not in data:
                         self.broadCastDeleteKVS(parsed_path[2])
+                        index = self.view.index(os.environ.get('SOCKET_ADDRESS'))
+                        # Process request
+                        self.metadata[index] = self.metadata[index] + 1
+                        print("Delete Metadata ", self.metadata)
+                    else:
+                        index = self.view.index(data['sock'])
+                        self.metadata[index] = self.metadata[index] + 1
+                        print("Delete Metadata ", self.metadata)
 
                 else:
                     self.send_response(404)
@@ -341,7 +474,9 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
 
                 # send a put /kvs/value to each view
                 url = "http://" + i + "/kvs/" + key
-                jsndict = {"replica": True}
+                jsndict = {"replica": True,
+                           "causal-metadata": self.metadata,
+                           "sock": os.environ.get('SOCKET_ADDRESS')}
                 data = json.dumps(jsndict)
                 response = requests.delete(url, data=data, timeout=5)
                 print("\nresponse is: ")
