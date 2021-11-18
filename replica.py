@@ -332,42 +332,41 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                 data = json.loads(body)
                 print("Json data from rqst: ", data)
 
-                # Check causal metadata
-                causal = data['causal-metadata']
-                if causal != None:
-                    print("We have causal metadata")
-                    socker = str(self.client_address[0]) + ":8090"
-                    flag503 = False
-                    if socker not in self.view:
-                        print("CLIENT REQUEST CHECKING FOR CAUSAL METADATA")
-                        indexOfOurSock = self.view.index(os.environ.get('SOCKET_ADDRESS'))
-                        print("Causal: ", causal)
-                        print("OurMetadata: ", self.metadata)
-                        print("index of our sock: ", indexOfOurSock)
-                        for i in range(0, len(self.metadata)):
-                            if self.metadata[i] != causal[i]:
-                                flag503 = True
-                    else:
-                        print("Replica request checking for causal metadata")
-                        indexOfClientSock = self.view.index(socker)
-                        print("Causal: ", causal)
-                        print("OurMetadata: ", self.metadata)
-                        print("index of our sock: ", indexOfClientSock)
-                        for i in range(0, len(self.metadata)):
-                            if self.metadata[i] != causal[i]:
-                                flag503 = True
-
-                    if flag503:
-                        self.send_response(503)
-                        self.send_header("Content-type", "application/json")
-                        self.end_headers()
-                        jsndict = {"error": "Causal dependencies not satisfied; try again later"}
-                        jsnrtrn = json.dumps(jsndict)
-                        self.wfile.write(jsnrtrn.encode("utf8"))
-                        return
-
                 # If key exists #200 OK else #404 Not Found
                 if parsed_path[2] in self.keyValueStore:
+                    # Check causal metadata
+                    causal = data['causal-metadata']
+                    if causal != None:
+                        print("We have causal metadata")
+                        socker = str(self.client_address[0]) + ":8090"
+                        flag503 = False
+                        if socker not in self.view:
+                            print("CLIENT REQUEST CHECKING FOR CAUSAL METADATA")
+                            indexOfOurSock = self.view.index(os.environ.get('SOCKET_ADDRESS'))
+                            print("Causal: ", causal)
+                            print("OurMetadata: ", self.metadata)
+                            print("index of our sock: ", indexOfOurSock)
+                            for i in range(0,len(self.metadata)):
+                                if self.metadata[i] != causal[i]:
+                                    flag503 = True
+                        else:
+                            print("Replica request checking for causal metadata")
+                            indexOfClientSock = self.view.index(socker)
+                            print("Causal: ", causal)
+                            print("OurMetadata: ", self.metadata)
+                            print("index of our sock: ", indexOfClientSock)
+                            for i in range(0, len(self.metadata)):
+                                if self.metadata[i] != causal[i]:
+                                    flag503 = True
+
+                        if flag503:
+                            self.send_response(503)
+                            self.send_header("Content-type", "application/json")
+                            self.end_headers()
+                            jsndict = {"error": "Causal dependencies not satisfied; try again later"}
+                            jsnrtrn = json.dumps(jsndict)
+                            self.wfile.write(jsnrtrn.encode("utf8"))
+                            return
 
                     self.send_response(200)
                     self.send_header("Content-type", "application/json")
@@ -420,47 +419,46 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
         if len(parsed_path) == 2 and parsed_path[1] == 'kvs': parsed_path.append("")  # Handle as if it was empty string
         if len(parsed_path) == 3:
             if parsed_path[1] == 'kvs':
-
-                # Get Json Body '{"socket-address":<NEW-REPLICA>}'
-                content_len = int(self.headers.get('content-length'))
-                body = self.rfile.read(content_len)
-                data = json.loads(body)
-
-                # Check for 503
-                causal = data['causal-metadata']
-                if causal != None:
-                    print("We have causal metadata")
-                    socker = str(self.client_address[0]) + ":8090"
-                    flag503 = False
-                    if socker not in self.view:
-                        print("CLIENT REQUEST CHECKING FOR CAUSAL METADATA")
-                        indexOfOurSock = self.view.index(os.environ.get('SOCKET_ADDRESS'))
-                        print("Causal: ", causal)
-                        print("OurMetadata: ", self.metadata)
-                        print("index of our sock: ", indexOfOurSock)
-                        for i in range(0, len(self.metadata)):
-                            if self.metadata[i] != causal[i]:
-                                flag503 = True
-                    else:
-                        print("Replica request checking for causal metadata")
-                        indexOfClientSock = self.view.index(socker)
-                        print("Causal: ", causal)
-                        print("OurMetadata: ", self.metadata)
-                        print("index of our sock: ", indexOfClientSock)
-                        for i in range(0, len(self.metadata)):
-                            if self.metadata[i] != causal[i]:
-                                flag503 = True
-
-                    if flag503:
-                        self.send_response(503)
-                        self.send_header("Content-type", "application/json")
-                        self.end_headers()
-                        jsndict = {"error": "Causal dependencies not satisfied; try again later"}
-                        jsnrtrn = json.dumps(jsndict)
-                        self.wfile.write(jsnrtrn.encode("utf8"))
-                        return
-
                 if parsed_path[2] in self.keyValueStore:
+
+                    # Get Json Body '{"socket-address":<NEW-REPLICA>}'
+                    content_len = int(self.headers.get('content-length'))
+                    body = self.rfile.read(content_len)
+                    data = json.loads(body)
+
+                    # Check for 503
+                    causal = data['causal-metadata']
+                    if causal != None:
+                        print("We have causal metadata")
+                        socker = str(self.client_address[0]) + ":8090"
+                        flag503 = False
+                        if socker not in self.view:
+                            print("CLIENT REQUEST CHECKING FOR CAUSAL METADATA")
+                            indexOfOurSock = self.view.index(os.environ.get('SOCKET_ADDRESS'))
+                            print("Causal: ", causal)
+                            print("OurMetadata: ", self.metadata)
+                            print("index of our sock: ", indexOfOurSock)
+                            for i in range(0, len(self.metadata)):
+                                if self.metadata[i] != causal[i]:
+                                    flag503 = True
+                        else:
+                            print("Replica request checking for causal metadata")
+                            indexOfClientSock = self.view.index(socker)
+                            print("Causal: ", causal)
+                            print("OurMetadata: ", self.metadata)
+                            print("index of our sock: ", indexOfClientSock)
+                            for i in range(0, len(self.metadata)):
+                                if self.metadata[i] != causal[i]:
+                                    flag503 = True
+
+                        if flag503:
+                            self.send_response(503)
+                            self.send_header("Content-type", "application/json")
+                            self.end_headers()
+                            jsndict = {"error": "Causal dependencies not satisfied; try again later"}
+                            jsnrtrn = json.dumps(jsndict)
+                            self.wfile.write(jsnrtrn.encode("utf8"))
+                            return
 
                     del self.keyValueStore[parsed_path[2]]
 
