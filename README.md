@@ -12,7 +12,7 @@ Eric Yao Huang:
 * Put and delete broadcasts
 
 ### Acknowledgements: 
-
+Tommaso would like to acknowledge TA Patrick for responding to Yuja posts for other students issues that related to my own and several of my own issues. These issues specifficaly related to testing when a replica disconnects from the network and partitions itself versus killing itself. 
 
 ### Citations:
 Python HTTP Server Documentation https://docs.python.org/3/library/http.server.html This citation was used in order to reference what parts of the httpserver library was needed in order to implement proper handling of responses to GET and PUT and DELETE requests.
