@@ -3,8 +3,13 @@
 Tommaso Framba :
 * All view operations
 * Server setup constructing and broadcast put view on server startup
+* Down detection for put and delete kvs broadcasts
+* All kvs operations
 
 Eric Yao Huang:
+* Vector clocks implementation and 503 causal consistency implementation to all kvs methods
+* Cleaned up code for submittal
+* Put and delete broadcasts
 
 ### Acknowledgements: 
 
@@ -17,4 +22,4 @@ Python Requests Documentation https://docs.python-requests.org/en/latest/ This i
 Python Sockets Documentation https://realpython.com/python-sockets/ This is the documentation on Python sockets that helped to implement detecting if the main server is down for part 2.
 
 ### Mechanism Description:
-TODO: When a replica does Key-value operations it checks if the server is down and if it is then it broadcasts a delete view request to all other addresses in view.
+When a replica does a PUT or DELETE it opens a socket to all addresses in view and pings them with a five second timeout. If the timeout occurs and there is no response it is appended to a list of views to delete. It then calls the deleteViews method that deletes non responsive views on the replica that got the request and forwards a delete view to all other replicas that are still alive.  
