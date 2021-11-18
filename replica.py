@@ -18,11 +18,11 @@ import subprocess
 from html.parser import HTMLParser
 
 
-
 #setup the server to initalize its address and view as class fields
 class http_server:
     def __init__(self, views, address):
         replicaStoreHandler.view = views
+        replicaStoreHandler.alwaysView = views.copy()
         replicaStoreHandler.sock = address
         replicaStoreHandler.startUpBroadcast(replicaStoreHandler)
         server = HTTPServer(('', int(address[1])),replicaStoreHandler)
@@ -33,6 +33,7 @@ class http_server:
 class replicaStoreHandler(BaseHTTPRequestHandler):
     keyValueStore = dict()
     view = []
+    alwaysView = []
     metadata = []
     sock = ""
 
@@ -57,6 +58,7 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
             host = i.split(":")
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5)
+            print(host)
             result = sock.connect_ex((host[0], int(host[1])))
             if result == 0:
                 sock.close()
@@ -64,6 +66,8 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                 #Send a put /view to the view
                 url = "http://" + i + "/view"
                 jsndict = {"socket-address": os.environ.get('SOCKET_ADDRESS')}
+
+                jsndict['increment-metadata'] = True
 
                 #If we need to get the key value store and state
                 if not getKVSFlag:
@@ -106,6 +110,7 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
             body = self.rfile.read(content_len)
             data = json.loads(body)
 
+
             #Check if address is in view
             checkAddress = data['socket-address']
             if checkAddress in self.view:
@@ -122,11 +127,21 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                 self.wfile.write(jsnrtrn.encode("utf8"))
 
             else:
+                if checkAddress not in self.alwaysView:
+                    self.alwaysView.append(checkAddress)
+                    self.metadata.append(0)
+                    print("my alwaysView: ", self.alwaysView)
+                    print("my new metadata: ", self.metadata)
                 self.view.append(checkAddress)
+
                 self.send_response(201)
                 self.send_header("Content-type", "application/json")
                 self.end_headers()
                 jsndict = {"result": "added"}
+
+
+
+
 
                 # If we need to get KVS pass it back in response
                 if 'getKVS' in data:
@@ -154,19 +169,23 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                     flag503 = False
                     if socker not in self.view:
                         print("CLIENT REQUEST CHECKING FOR CAUSAL METADATA")
-                        indexOfOurSock = self.view.index(os.environ.get('SOCKET_ADDRESS'))
+                        indexOfOurSock = self.alwaysView.index(os.environ.get('SOCKET_ADDRESS'))
                         print("Causal: ", causal)
                         print("OurMetadata: ", self.metadata)
                         print("index of our sock: ", indexOfOurSock)
+                        if len(self.metadata) < len(causal): self.metadata.append(0)
+                        elif len(self.metadata) > len(causal): causal.append(0)
                         for i in range(0, len(self.metadata)):
                             if self.metadata[i] != causal[i]:
                                 flag503 = True
                     else:
                         print("Replica request checking for causal metadata")
-                        indexOfClientSock = self.view.index(socker)
+                        indexOfClientSock = self.alwaysView.index(socker)
                         print("Causal: ", causal)
                         print("OurMetadata: ", self.metadata)
                         print("index of our sock: ", indexOfClientSock)
+                        if len(self.metadata) < len(causal): self.metadata.append(0)
+                        elif len(self.metadata) > len(causal): causal.append(0)
                         for i in range(0, len(self.metadata)):
                             if self.metadata[i] != causal[i]:
                                 flag503 = True
@@ -205,12 +224,12 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                         # replica broadcasts write to all the other replicas
                         # update our own metadata
                         if 'replica' not in data:
-                            self.broadCastPutKVS(parsed_path[2], data['value'])
-                            index = self.view.index(os.environ.get('SOCKET_ADDRESS'))
+                            self.broadCastKVS(parsed_path[2], data['value'], True)
+                            index = self.alwaysView.index(os.environ.get('SOCKET_ADDRESS'))
                             self.metadata[index] = self.metadata[index] + 1
                             print("Metadata ", self.metadata)
                         else:
-                            index = self.view.index(data['sock'])
+                            index = self.alwaysView.index(data['sock'])
                             self.metadata[index] = self.metadata[index] + 1
                             print("Metadata ", self.metadata)
 
@@ -230,12 +249,12 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                         # replica broadcasts write to all the other replicas
                         # update our own metadata
                         if 'replica' not in data:
-                            self.broadCastPutKVS(parsed_path[2], data['value'])
-                            index = self.view.index(os.environ.get('SOCKET_ADDRESS'))
+                            self.broadCastKVS(parsed_path[2], data['value'], True)
+                            index = self.alwaysView.index(os.environ.get('SOCKET_ADDRESS'))
                             self.metadata[index] = self.metadata[index] + 1
                             print("Metadata ", self.metadata)
                         else:
-                            index = self.view.index(data['sock'])
+                            index = self.alwaysView.index(data['sock'])
                             self.metadata[index] = self.metadata[index] + 1
                             print("Metadata ", self.metadata)
 
@@ -273,10 +292,9 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                 print(response)
         print("Our new view ", self.view)
 
-    #Broadcast our put
-    def broadCastPutKVS(self, key, value):
+    #Broadcast a put or delete to the KVS
+    def broadCastKVS(self, key, value, putOrDelete):
         deleteThese = []
-
         for i in self.view:
             #Don't send to our own address
             if i == os.environ.get('SOCKET_ADDRESS'):
@@ -287,25 +305,36 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5)
             result = sock.connect_ex((host[0], int(host[1])))
-            print("TRYING TO CONNECT TO ", i)
-            print("result = ", result)
+
             if result == 0:
                 sock.close()
 
-                # send a put /kvs/value to each view
-                url = "http://" + i + "/kvs/" + key
-                jsndict = {"value": value,
-                           "replica": True,
-                           "causal-metadata": self.metadata,
-                           "sock": os.environ.get('SOCKET_ADDRESS')}
-                data = json.dumps(jsndict)
-                response = requests.put(url, data=data, timeout=5)
-                print("\nresponse is: ")
-                print(response)
+                if putOrDelete:
+                    # send a put /kvs/value to each view
+                    url = "http://" + i + "/kvs/" + key
+                    jsndict = {"value": value,
+                               "replica": True,
+                               "causal-metadata": self.metadata,
+                               "sock": os.environ.get('SOCKET_ADDRESS')}
+                    data = json.dumps(jsndict)
+                    response = requests.put(url, data=data, timeout=5)
+                    print("\nresponse is: ")
+                    print(response)
+                else:
+                    # send a delete /kvs/value to each view
+                    url = "http://" + i + "/kvs/" + key
+                    jsndict = {"replica": True,
+                               "causal-metadata": self.metadata,
+                               "sock": os.environ.get('SOCKET_ADDRESS')}
+                    data = json.dumps(jsndict)
+                    response = requests.delete(url, data=data, timeout=5)
+                    print("\nresponse is: ")
+                    print(response)
             else:
                 print("One is down delete it!")
                 deleteThese.append(i)
-        #Delete all views that are dead
+
+        #Delete all dead views
         self.deleteDeadViews(deleteThese)
 
     #Handle get requests
@@ -342,19 +371,27 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                         flag503 = False
                         if socker not in self.view:
                             print("CLIENT REQUEST CHECKING FOR CAUSAL METADATA")
-                            indexOfOurSock = self.view.index(os.environ.get('SOCKET_ADDRESS'))
+                            indexOfOurSock = self.alwaysView.index(os.environ.get('SOCKET_ADDRESS'))
                             print("Causal: ", causal)
                             print("OurMetadata: ", self.metadata)
                             print("index of our sock: ", indexOfOurSock)
+                            if len(self.metadata) < len(causal):
+                                self.metadata.append(0)
+                            elif len(self.metadata) > len(causal):
+                                causal.append(0)
                             for i in range(0,len(self.metadata)):
                                 if self.metadata[i] != causal[i]:
                                     flag503 = True
                         else:
                             print("Replica request checking for causal metadata")
-                            indexOfClientSock = self.view.index(socker)
+                            indexOfClientSock = self.alwaysView.index(socker)
                             print("Causal: ", causal)
                             print("OurMetadata: ", self.metadata)
                             print("index of our sock: ", indexOfClientSock)
+                            if len(self.metadata) < len(causal):
+                                self.metadata.append(0)
+                            elif len(self.metadata) > len(causal):
+                                causal.append(0)
                             for i in range(0, len(self.metadata)):
                                 if self.metadata[i] != causal[i]:
                                     flag503 = True
@@ -399,7 +436,7 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
             # Check if address is in view
             checkAddress = data['socket-address']
             if checkAddress in self.view:
-                indexOf = self.view.index(checkAddress)
+                indexOf = self.alwaysView.index(checkAddress)
                 self.view.remove(checkAddress)
                 self.send_response(200)
                 self.send_header("Content-type", "application/json")
@@ -434,19 +471,27 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                         flag503 = False
                         if socker not in self.view:
                             print("CLIENT REQUEST CHECKING FOR CAUSAL METADATA")
-                            indexOfOurSock = self.view.index(os.environ.get('SOCKET_ADDRESS'))
+                            indexOfOurSock = self.alwaysView.index(os.environ.get('SOCKET_ADDRESS'))
                             print("Causal: ", causal)
                             print("OurMetadata: ", self.metadata)
                             print("index of our sock: ", indexOfOurSock)
+                            if len(self.metadata) < len(causal):
+                                self.metadata.append(0)
+                            elif len(self.metadata) > len(causal):
+                                causal.append(0)
                             for i in range(0, len(self.metadata)):
                                 if self.metadata[i] != causal[i]:
                                     flag503 = True
                         else:
                             print("Replica request checking for causal metadata")
-                            indexOfClientSock = self.view.index(socker)
+                            indexOfClientSock = self.alwaysView.index(socker)
                             print("Causal: ", causal)
                             print("OurMetadata: ", self.metadata)
                             print("index of our sock: ", indexOfClientSock)
+                            if len(self.metadata) < len(causal):
+                                self.metadata.append(0)
+                            elif len(self.metadata) > len(causal):
+                                causal.append(0)
                             for i in range(0, len(self.metadata)):
                                 if self.metadata[i] != causal[i]:
                                     flag503 = True
@@ -464,12 +509,12 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
 
                     # update local causal metadata
                     if 'replica' not in data:
-                        self.broadCastDeleteKVS(parsed_path[2])
-                        index = self.view.index(os.environ.get('SOCKET_ADDRESS'))
+                        self.broadCastKVS(parsed_path[2], None, False)
+                        index = self.alwaysView.index(os.environ.get('SOCKET_ADDRESS'))
                         self.metadata[index] = self.metadata[index] + 1
                         print("Delete Metadata ", self.metadata)
                     else:
-                        index = self.view.index(data['sock'])
+                        index = self.alwaysView.index(data['sock'])
                         self.metadata[index] = self.metadata[index] + 1
                         print("Delete Metadata ", self.metadata)
 
@@ -488,38 +533,6 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                     jsndict = {"error": "Key does not exist"}
                     jsnrtrn = json.dumps(jsndict)
                     self.wfile.write(jsnrtrn.encode("utf8"))
-
-    # broadcast the delete to all other views
-    def broadCastDeleteKVS(self, key):
-        deleteThese = []
-        for i in self.view:
-            #Don't send to our own address
-            if i == os.environ.get('SOCKET_ADDRESS'):
-                continue
-
-            # Check if the view is up
-            host = i.split(":")
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(5)
-            result = sock.connect_ex((host[0], int(host[1])))
-            if result == 0:
-                sock.close()
-
-                # send a delete /kvs/value to each view
-                url = "http://" + i + "/kvs/" + key
-                jsndict = {"replica": True,
-                           "causal-metadata": self.metadata,
-                           "sock": os.environ.get('SOCKET_ADDRESS')}
-                data = json.dumps(jsndict)
-                response = requests.delete(url, data=data, timeout=5)
-                print("\nresponse is: ")
-                print(response)
-            else:
-                print("One is down delete it!")
-                deleteThese.append(i)
-
-        #Delete all dead views
-        self.deleteDeadViews(deleteThese)
 
 # start and run server on specified port
 def main():
