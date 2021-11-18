@@ -46,7 +46,6 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
 
         for i in self.view:
 
-
             #Don't check our own socket address
             if i == os.environ.get('SOCKET_ADDRESS'):
                 continue
@@ -54,6 +53,7 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
             #Check if the view is up
             host = i.split(":")
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
             result = sock.connect_ex((host[0], int(host[1])))
             if result == 0:
                 sock.close()
@@ -252,22 +252,30 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
 
 
     def deleteDeadViews(self, deleteThis):
-        for i in self.view:
+        print("Our view ", self.view)
+        print("Delete this ", deleteThis)
+        viewAppended = [x for x in self.view if x not in deleteThis]
+        for i in viewAppended:
             # Don't send to our own address
             if i == os.environ.get('SOCKET_ADDRESS'):
-                indexOf = self.view.index(deleteThis)
-                del self.metadata[indexOf]
-                self.view.remove(deleteThis)
+                for x in deleteThis:
+                    print("Deleting on our own view: ", x)
+                    self.view.remove(x)
                 continue
 
-            url = "http://" + i + "/view"
-            jsndict = {"socket-address": deleteThis}
-            data = json.dumps(jsndict)
-            response = requests.delete(url, data=data, timeout=5)
-            print("\nresponse is: ")
-            print(response)
+            for x in deleteThis:
+                print("Deleting ", x, " on ", i)
+                url = "http://" + i + "/view"
+                jsndict = {"socket-address": x}
+                data = json.dumps(jsndict)
+                response = requests.delete(url, data=data, timeout=5)
+                print("\nresponse is: ")
+                print(response)
+        print("Our new view ", self.view)
 
     def broadCastPutKVS(self, key, value):
+        deleteThese = []
+
         for i in self.view:
             #Don't send to our own address
             if i == os.environ.get('SOCKET_ADDRESS'):
@@ -276,7 +284,10 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
             # Check if the view is up
             host = i.split(":")
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
             result = sock.connect_ex((host[0], int(host[1])))
+            print("TRYING TO CONNECT TO ", i)
+            print("result = ", result)
             if result == 0:
                 sock.close()
 
@@ -292,10 +303,9 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                 print(response)
             else:
                 print("One is down delete it!")
-                #self.deleteDeadViews(i)
+                deleteThese.append(i)
 
-
-
+        self.deleteDeadViews(deleteThese)
 
     def do_GET(self):
         parsed_path = urlparse(self.path).path.split("/")
@@ -389,7 +399,7 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
             checkAddress = data['socket-address']
             if checkAddress in self.view:
                 indexOf = self.view.index(checkAddress)
-                del self.metadata[indexOf]
+                #del self.metadata[indexOf]
                 self.view.remove(checkAddress)
                 self.send_response(200)
                 self.send_header("Content-type", "application/json")
@@ -481,6 +491,7 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                     self.wfile.write(jsnrtrn.encode("utf8"))
 
     def broadCastDeleteKVS(self, key):
+        deleteThese = []
         for i in self.view:
             #Don't send to our own address
             if i == os.environ.get('SOCKET_ADDRESS'):
@@ -489,6 +500,7 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
             # Check if the view is up
             host = i.split(":")
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
             result = sock.connect_ex((host[0], int(host[1])))
             if result == 0:
                 sock.close()
@@ -503,8 +515,9 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                 print("\nresponse is: ")
                 print(response)
             else:
-                print("One is down delete it!")
-                #self.deleteDeadViews(i)
+                print("One is down in delete delete it!")
+                self.view.remove(i)
+                deleteThese.append(i)
 
 # start and run server on specified port
 def main():
