@@ -37,6 +37,18 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
     metadata = []
     sock = ""
 
+    def incrementMetadata(self, index):
+        self.metadata[index] = self.metadata[index] + 1
+        print("Metadata: ", self.metadata)
+
+    def return503(self):
+        self.send_response(503)
+        self.send_header("Content-type", "application/json")
+        self.end_headers()
+        jsndict = {"error": "Causal dependencies not satisfied; try again later"}
+        jsnrtrn = json.dumps(jsndict)
+        self.wfile.write(jsnrtrn.encode("utf8"))  
+        
     # When a new replica is started broadcast its view to
     # other replicas so they can add to their own view
     def startUpBroadcast(self):
@@ -533,7 +545,7 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                     jsndict = {"error": "Key does not exist"}
                     jsnrtrn = json.dumps(jsndict)
                     self.wfile.write(jsnrtrn.encode("utf8"))
-
+    
 # start and run server on specified port
 def main():
     #Get -e vars
