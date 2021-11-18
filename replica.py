@@ -34,19 +34,22 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
     keyValueStore = dict()
     view = []
     metadata = []
-    count = 0
     sock = ""
 
-
+    # When a new replica is started broadcast its view to
+    # other replicas so they can add to their own view
     def startUpBroadcast(self):
+        #Do we need to get key value store and state
         getKVSFlag = False
         getStateFlag = False
 
+        #initialize our metadata
         self.metadata = [0] * len(self.view)
 
+        #For every view send a put view
         for i in self.view:
 
-            #Don't check our own socket address
+            #Don't send to our own socket address
             if i == os.environ.get('SOCKET_ADDRESS'):
                 continue
 
@@ -58,39 +61,40 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
             if result == 0:
                 sock.close()
 
-                #send a put /view to each view
+                #Send a put /view to the view
                 url = "http://" + i + "/view"
                 jsndict = {"socket-address": os.environ.get('SOCKET_ADDRESS')}
 
-                #We need to get the kvs
+                #If we need to get the key value store and state
                 if not getKVSFlag:
                     print("We need to get kvs asking ", i)
                     jsndict['getKVS'] = True
                     jsndict['getState'] = True
 
+                #Get back the json data from the view we requested
                 data = json.dumps(jsndict)
                 response = requests.put(url, data=data, timeout=2.50)
                 dataFromResponse = response.json()
 
+                #Put the key value store from view into our key value store
                 if not getKVSFlag:
                     self.keyValueStore = dataFromResponse['kvs']
                     print(self.keyValueStore)
                     getKVSFlag = True
 
+                #Put the state from view into our own state
                 if not getStateFlag:
                     self.metadata = dataFromResponse['state']
                     print(self.metadata)
                     getStateFlag = True
 
-                print(dataFromResponse)
-                print("\nresponse is: ")
-                print(response)
             else:
-                print(i + " is not up yet")
+                #View is not up
+                print(i + " is not up")
 
 
 
-    # handle post requests
+    # handle PUT requests
     def do_PUT(self):
         parsed_path = urlparse(self.path).path.split("/")
 
@@ -101,30 +105,29 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
             content_len = int(self.headers.get('content-length'))
             body = self.rfile.read(content_len)
             data = json.loads(body)
-            #print("What is data: ", data)
 
             #Check if address is in view
             checkAddress = data['socket-address']
-            #print("Check address: ", checkAddress)
             if checkAddress in self.view:
                 self.send_response(200)
                 self.send_header("Content-type", "application/json")
                 self.end_headers()
                 jsndict = {"result": "already present"}
+
                 #If we need to get KVS pass it back in response
                 if 'getKVS' in data:
                     jsndict['kvs'] = self.keyValueStore
                     jsndict['state'] = self.metadata
                 jsnrtrn = json.dumps(jsndict)
                 self.wfile.write(jsnrtrn.encode("utf8"))
+
             else:
                 self.view.append(checkAddress)
                 self.send_response(201)
                 self.send_header("Content-type", "application/json")
                 self.end_headers()
-                #self.metadata.append(0) #add a new slot for new replica
-
                 jsndict = {"result": "added"}
+
                 # If we need to get KVS pass it back in response
                 if 'getKVS' in data:
                     jsndict['kvs'] = self.keyValueStore
@@ -177,8 +180,6 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                         self.wfile.write(jsnrtrn.encode("utf8"))
                         return
 
-
-
                 # 400 BAD REQUEST KEY TOO LONG
                 if len(parsed_path[2]) > 50:
                     self.send_response(400)
@@ -202,10 +203,10 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                         self.keyValueStore[parsed_path[2]] = data['value']
 
                         # replica broadcasts write to all the other replicas
+                        # update our own metadata
                         if 'replica' not in data:
                             self.broadCastPutKVS(parsed_path[2], data['value'])
                             index = self.view.index(os.environ.get('SOCKET_ADDRESS'))
-                            # Process request
                             self.metadata[index] = self.metadata[index] + 1
                             print("Metadata ", self.metadata)
                         else:
@@ -213,6 +214,7 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                             self.metadata[index] = self.metadata[index] + 1
                             print("Metadata ", self.metadata)
 
+                        #Send back response
                         self.send_response(200)
                         self.send_header("Content-type", "application/json")
                         self.end_headers()
@@ -225,15 +227,11 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                         #Store the keyvalue pair
                         self.keyValueStore[parsed_path[2]] = data['value']
 
-                        #update local causal metadata
-
-                        #Respond to client with a json including new causal
-
-                        #replica broadcasts write to all the other replicas
+                        # replica broadcasts write to all the other replicas
+                        # update our own metadata
                         if 'replica' not in data:
                             self.broadCastPutKVS(parsed_path[2], data['value'])
                             index = self.view.index(os.environ.get('SOCKET_ADDRESS'))
-                            # Process request
                             self.metadata[index] = self.metadata[index] + 1
                             print("Metadata ", self.metadata)
                         else:
@@ -241,6 +239,7 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                             self.metadata[index] = self.metadata[index] + 1
                             print("Metadata ", self.metadata)
 
+                        #Send back response
                         self.send_response(201)
                         self.send_header("Content-type", "application/json")
                         self.end_headers()
@@ -248,12 +247,12 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                         jsnrtrn = json.dumps(jsndict)
                         self.wfile.write(jsnrtrn.encode("utf8"))
 
-
-
-
+    #If there are dead views delete them
     def deleteDeadViews(self, deleteThis):
         print("Our view ", self.view)
         print("Delete this ", deleteThis)
+
+        #for all views in our view that are not to be deleted
         viewAppended = [x for x in self.view if x not in deleteThis]
         for i in viewAppended:
             # Don't send to our own address
@@ -263,6 +262,7 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                     self.view.remove(x)
                 continue
 
+            #On other addresses delete this view
             for x in deleteThis:
                 print("Deleting ", x, " on ", i)
                 url = "http://" + i + "/view"
@@ -273,6 +273,7 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                 print(response)
         print("Our new view ", self.view)
 
+    #Broadcast our put
     def broadCastPutKVS(self, key, value):
         deleteThese = []
 
@@ -304,9 +305,10 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
             else:
                 print("One is down delete it!")
                 deleteThese.append(i)
-
+        #Delete all views that are dead
         self.deleteDeadViews(deleteThese)
 
+    #Handle get requests
     def do_GET(self):
         parsed_path = urlparse(self.path).path.split("/")
 
@@ -382,7 +384,7 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                     jsnrtrn = json.dumps(jsndict)
                     self.wfile.write(jsnrtrn.encode("utf8"))
 
-
+    #Handle delete requests
     def do_DELETE(self):
         parsed_path = urlparse(self.path).path.split("/")
 
@@ -394,12 +396,10 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
             body = self.rfile.read(content_len)
             data = json.loads(body)
 
-
             # Check if address is in view
             checkAddress = data['socket-address']
             if checkAddress in self.view:
                 indexOf = self.view.index(checkAddress)
-                #del self.metadata[indexOf]
                 self.view.remove(checkAddress)
                 self.send_response(200)
                 self.send_header("Content-type", "application/json")
@@ -466,7 +466,6 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                     if 'replica' not in data:
                         self.broadCastDeleteKVS(parsed_path[2])
                         index = self.view.index(os.environ.get('SOCKET_ADDRESS'))
-                        # Process request
                         self.metadata[index] = self.metadata[index] + 1
                         print("Delete Metadata ", self.metadata)
                     else:
@@ -474,14 +473,14 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                         self.metadata[index] = self.metadata[index] + 1
                         print("Delete Metadata ", self.metadata)
 
+                    # send back response
                     self.send_response(200)
                     self.send_header("Content-type", "application/json")
                     self.end_headers()
                     jsndict = {"result": "deleted"}
                     jsnrtrn = json.dumps(jsndict)
                     self.wfile.write(jsnrtrn.encode("utf8"))
-
-
+                #404 key dosent exist
                 else:
                     self.send_response(404)
                     self.send_header("Content-type", "application/json")
@@ -490,6 +489,7 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                     jsnrtrn = json.dumps(jsndict)
                     self.wfile.write(jsnrtrn.encode("utf8"))
 
+    # broadcast the delete to all other views
     def broadCastDeleteKVS(self, key):
         deleteThese = []
         for i in self.view:
@@ -505,7 +505,7 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
             if result == 0:
                 sock.close()
 
-                # send a put /kvs/value to each view
+                # send a delete /kvs/value to each view
                 url = "http://" + i + "/kvs/" + key
                 jsndict = {"replica": True,
                            "causal-metadata": self.metadata,
@@ -515,9 +515,11 @@ class replicaStoreHandler(BaseHTTPRequestHandler):
                 print("\nresponse is: ")
                 print(response)
             else:
-                print("One is down in delete delete it!")
-                self.view.remove(i)
+                print("One is down delete it!")
                 deleteThese.append(i)
+
+        #Delete all dead views
+        self.deleteDeadViews(deleteThese)
 
 # start and run server on specified port
 def main():
